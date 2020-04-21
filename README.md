@@ -1,7 +1,7 @@
 # VLBR
 Vertica Logical Backup Recovery Script "VLBR.sh" has been created to archive data in open data formats like CSV ZIP , or PARQUET. 
 
-# Use Cases where this utility can help
+## Use Cases where this utility can help
 1) We have different Verica database environmets. Some of them are 3 node cluster and some of them are 6 node cluster. They can not connect to each other to run IMPORT/EXPORT and we need an option to transfer data.
 2) We have done a development on our 1 node database and we want to deploy our certain master data into different production clusters at different customer location and we want to give them dump so thay can deploy by themself. 
 3) We want to backup certain tables data in open format to repurpose this OR feed into other applications as well. 
