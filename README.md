@@ -7,11 +7,14 @@ Vertica Logical Backup Recovery Script "VLBR.sh" has been created to archive dat
 3) We want to backup certain tables data in open format to repurpose this OR feed into other applications as well. 
 
 
-## Dependency & Assupitions 
+## Dependency & Assumptions 
 
-1) Default shell is /bin/bash
-2) Vertica VSQL command is avalaible at available at /opt/vertica/bin/vsql
-3) This script will be runing on Vertica server as default database connection is on localhost 
+1) This script will be runing on Vertica server as default database connection is on localhost 
+2) Default shell is /bin/bash
+3) Vertica VSQL command is avalaible at /opt/vertica/bin/vsql
+4) tar, gzip are installed. 
+5) Vertica version is at least 8.1
+6) It can not perform incremental Backup however Restore with Append Only option is available
 
 ## Examples 
 
