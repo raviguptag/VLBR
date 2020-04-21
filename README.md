@@ -21,8 +21,12 @@ $ VLBR.sh -t backup  -d /home/dbadmin/bkp -c PARQUET -u dbadmin -w password -s
 2) Backup certain tables - Firt define target tables in a text file like below and then use below command. In this example we want to backup 1 table store_fact in schema EDW and all tables of schema DIM.  
 
 $ cat tables.txt
+
 EDW.store_fact
+
 DIM.*
+
+
 
 $ VLBR.sh -t backup  -f tables.txt -d /home/dbadmin/bkp -c GZIP -u dbadmin -w password -s 
 
