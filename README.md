@@ -18,7 +18,8 @@ Vertica Logical Backup Recovery Script "VLBR.sh" has been created to archive dat
 ## Examples 
 
 1) Backup schema EDW into a target directory /home/dbadmin/bkp use below command  
-$ VLBR.sh -t backup  -d /home/dbadmin/bkp -c PARQUET -u dbadmin -w password -s 
+$ VLBR.sh -t backup  -d /home/dbadmin/bkp -c PARQUET -u dbadmin -w password -S EDW  
+
 
 2) Backup certain tables - Firt define target tables in a text file like below and then use below command. In this example we want to backup 1 table store_fact in schema EDW and all tables of schema DIM.  
 
@@ -32,7 +33,9 @@ DIM.*
 
 $ VLBR.sh -t backup  -f tables.txt -d /home/dbadmin/bkp -c GZIP -u dbadmin -w password
 
+
 3) Restore this backup data into another Vertica database. 
+
 $ VLBR.sh -t restore -d /home/dbadmin/bkp -u dbadmin -w pass123
 
 For more options use -h flag to get complete list.
