@@ -1,4 +1,4 @@
-#!/bin/bash 
+#!/bin/bash -x
 
 # ########################################################################################################
 # Name     : VLBR.sh
@@ -25,6 +25,7 @@ COMPRESS_TYPE=GZIP
 Port=5433
 CompileBackupDir=0
 BackupConcurrency=1
+DbNodeCount=1
 function usage() {
 echo " 
 Usage: VLBR.sh -t backup|restore -d backup_directory [-z GZIP|PARQUET]  [-f table_name_file] [-r resource_pool] -S [SchmeaName] [-A] [-F] [-h] 
@@ -47,8 +48,9 @@ Usage: VLBR.sh -t backup|restore -d backup_directory [-z GZIP|PARQUET]  [-f tabl
 
 }
 
-VSQLA="/opt/vertica/bin/vsql -p $Port -t -A "
+VSQLA="/opt/vertica/bin/vsql -p $Port -AXtn "
 VSQL="/opt/vertica/bin/vsql -p $Port"
+VSQLC="/opt/vertica/bin/vsql -AXtnq "
 
 #echo "ECHO $# , , $* "
 
@@ -146,10 +148,16 @@ BackupTableDefinitions=${BackupDir}/backup_tables_ddl.sql
 # -------------------------------------------------------------------
 # Few Checks
 # -------------------------------------------------------------------
-testdb=`$VSQLA -c "SELECT 1"`
+AnyNodeDown=`$VSQLC -c "SELECT count(1) FROM nodes where node_state = 'DOWN'"`
 if [ $? -ne 0 ]; then echo "ERROR: Failed to connect database"; exit 1; fi
+if [ $AnyNodeDown -gt 0 ]; then 
+  TargetBackupNodes=`$VSQLC -c "select node_address from nodes order by node_name limit 1"`
+else
+  TargetBackupNodes=`$VSQLC -R' ' -c "select node_address from nodes order by node_name"`
+  DbNodeCount=`$VSQLC -c "SELECT count(1) FROM nodes"`
+fi
 
-if [ $BackupConcurrency -gt 1 ]; then 
+if [ $BackupConcurrency -ge 1 ]; then 
     echo "INFO: Backup concurrency  set to $BackupConcurrency"; 
  else 
     echo "ERROR: Backup concurrency cannot be less than 1"; exit 1; 
@@ -192,12 +200,12 @@ function build_tables_list() {
   fi
 
   if [ "${FullBackupRestore}" == "Y" ]; then
-    WHERE_CLAUSE=" WHERE is_flextable = 'f' ";
+    WHERE_CLAUSE=" WHERE is_flextable = 'f' AND length(table_definition) = 0 ";
   else
-    WHERE_CLAUSE=" WHERE upper(table_schema) IN ( $SchemaInClause ) AND is_flextable = 'f' "
+    WHERE_CLAUSE=" WHERE upper(table_schema) IN ( $SchemaInClause ) AND is_flextable = 'f' AND length(table_definition) = 0 "
   fi
 
-  #echo "INFO: SchemaInClause = $SchemaInClause, and WHERE Clause is $WHERE_CLAUSE "
+  echo "INFO:`date`: Trying to get table list SchemaInClause = $SchemaInClause, and WHERE Clause is $WHERE_CLAUSE "
   $VSQLA <<EOF >> $BackupTableListFile 2>> $BackupLog
     SELECT table_schema||'.'||table_name 
       FROM tables
@@ -213,8 +221,8 @@ function backup() {
     if [[ -f "$TableNamesFile" ]]; then 
         cat $TableNamesFile | grep -v '\.\*' > $BackupTableListFile
     fi  
-    get_db_info >> $BackupLog 2>&1
-    build_tables_list;
+    get_db_info >> $BackupLog 2>&1;
+    build_tables_list >> $BackupLog 2>&1;
     rm -f ${BackupTableDefinitions}
     i=0
     touch $BackupCompletedFile
@@ -232,15 +240,30 @@ function backup() {
         rm -f $BackupDataDir/${table}.csv $BackupDataDir/${table}.csv.gz 
         echo "INFO: `date`: Starting backup of asked object $line , table =  $table , ${table_name}, Compress $COMPRESS_TYPE,  Where Clause = $where_clause"   >> $BackupLog
         table_count=`get_table_count $table`
+        segment_expression=`$VSQLC -c "SELECT segment_expression FROM projections WHERE anchor_table_name = '$table_name' and projection_schema  = '$schema_name' and is_super_projection ='t' order by is_segmented desc limit 1"`
         $VSQLA -c "SELECT export_objects('', '$table', false ); " | \
-           sed -e 's/ OFFSET [01]//' -e 's/ KSAFE 1//' -e "s/\/\*+createtype/\/\*+basename($table_name),createtype/" -e "s/\*+basename(.*),crea/*+basename($var),crea/" >> $BackupTableDefinitions
+           sed -e 's/ OFFSET [01]//' -e 's/ KSAFE 1//' -e "s/\/\*+createtype/\/\*+basename($table_name),createtype/" -e "s/\*+basename(.*),crea/*+basename($table_name),crea/" >> $BackupTableDefinitions
 
         if [[ "$COMPRESS_TYPE" == "GZIP" ]]; then
-            { $VSQLA -c "SELECT * FROM $table $where_clause" -o $BackupDataDir/${table}.csv >> $BackupLog; gzip $BackupDataDir/${table}.csv; } || { echo "ERROR: Failed to backup table $table"; exit 1; } &
-            # gzip $BackupDataDir/${table}.csv &
+            if [ \( "X${segment_expression}" == "X" \) -o \( $table_count -le 999999 \) ]; then
+                #{ $VSQLA -c "SELECT * FROM $table $where_clause" -o $BackupDataDir/${table}.csv >> $BackupLog; gzip $BackupDataDir/${table}.csv; } || { echo "ERROR: Failed to backup table $table"; exit 1; } &
+                { $VSQLA -c "SELECT * FROM $table $where_clause" | gzip -c > $BackupDataDir/${table}.0.csv.gz; } || { echo "ERROR: Failed to backup table $table"; exit 1; } &
+                # gzip $BackupDataDir/${table}.csv &
+            else
+                where_clause=`echo $where_clause | sed -e "s/^\s*where / AND /i"`
+                segment_expression=`echo $segment_expression | sed -e "s/^/WHERE /"`
+                hidx=0;
+                for vnode in `echo $TargetBackupNodes`
+                do
+                   SELECT_SQL="SELECT * FROM $table ${segment_expression} % ${DbNodeCount} = ${hidx}  $where_clause";
+                   echo "INFO: `date`: Runing on $vnode SQL: $SELECT_SQL " >> $BackupLog;
+                   { $VSQLA -h $vnode -c "$SELECT_SQL" | gzip -c > $BackupDataDir/${table}.${hidx}.csv.gz; } || { echo "ERROR: Failed to backup table $table"; exit 1; } &
+                   ((hidx++))
+                done
+            fi
         elif [[ "$COMPRESS_TYPE" == "PARQUET" ]]; then
             rm -rf $BackupDataDir/${table}/
-            ExportSQL="EXPORT TO PARQUET ( directory='$BackupDataDir/${table}', rowGroupSizeMB=100 ) AS SELECT ";
+            ExportSQL="EXPORT TO PARQUET ( directory='$BackupDataDir/${table}', rowGroupSizeMB=10 ) AS SELECT ";
             #ColumnStr=`$VSQLA -c "SELECT column_name||decode(data_type, 'time', '::varchar AS '||column_name||',', ',' )  FROM columns where table_schema = '$schema_name' and table_name = '$table_name'  order by ordinal_position" | tr -d '\n' | sed -e "s/,$/)/" -e "s/^/(/" `
             ColumnStr=`$VSQLA -c "SELECT column_name||decode(data_type, 'time', '::varchar AS '||column_name||',', ',' )  FROM columns where table_schema = '$schema_name' and table_name = '$table_name'  order by ordinal_position" | tr -d '\n' | sed -e "s/,$//" `
             # $VSQL -c "EXPORT TO PARQUET (directory = '$BackupDataDir/${table}') AS SELECT * FROM $table  $where_clause"
@@ -307,10 +330,12 @@ function restore() {
         table_name=`echo $table | cut -f2 -d'.'`;
         COMPRESS_TYPE=`echo $line | cut -f2 -d','`;
         if [ $COMPRESS_TYPE == 'GZIP' ]; then
-            data_file="${BackupDataDir}/${table}.csv.gz"
+            data_file="${BackupDataDir}/${table}.0.csv.gz"
             if [[ -f $data_file ]]; then 
+                ColumnStr=`$VSQLA -c "SELECT CASE WHEN ( column_default ilike '%select %' ) THEN ' _set_column_'||column_name||' FILLER VARCHAR,'  WHEN (length(column_set_using) > 0 ) THEN ' _set_column_'||column_name||' FILLER VARCHAR,' WHEN (data_type='time') THEN ' _timeFiller_'||column_name||' FILLER VARCHAR, '||column_name||' AS _timeFiller_'||column_name||'::time,' ELSE  column_name||',' END FROM columns where table_schema = '$schema_name' and table_name = '$table_name'  order by ordinal_position" | tr -d '\n' | sed -e "s/^/(/" -e "s/,$/)/" `
+                data_file="${BackupDataDir}/${table}.*csv.gz"
                 echo "INFO: `date`: Starting copy for table $table_name, from file $data_file , Compression Type $COMPRESS_TYPE ." >> $RestoreLog
-                $VSQLA -e -c " COPY $table FROM '$data_file'  $COMPRESS_TYPE DELIMITER '|' NULL AS '' DIRECT" >>  $RestoreLog 2>&1
+                $VSQLA -e -c " COPY $table ${ColumnStr} FROM '$data_file'  $COMPRESS_TYPE DELIMITER '|' NULL AS '' DIRECT" >>  $RestoreLog 2>&1
                 if [ $? -ne 0 ]; then echo "ERROR: Failed to restore table $table"; exit 1; fi
                 echo "INFO: `date`: Completed restore of table $table"   >>  $RestoreLog
             else
@@ -323,10 +348,10 @@ function restore() {
             else 
                 flcnt=`ls -s "$data_dir" | head -1 | cut -f2 -d' '`;
                 if [ $flcnt -gt 0 ]; then
-                  ColumnStr=`$VSQLA -c "SELECT decode(data_type, 'time', ' _timeFiller FILLER VARCHAR, '||column_name||' AS _timeFiller::time,', column_name||',' )  FROM columns where table_schema = '$schema_name' and table_name = '$table_name'  order by ordinal_position" | tr -d '\n' | sed -e "s/^/(/" -e "s/,$/)/" `
+                  ColumnStr=`$VSQLA -c "SELECT CASE WHEN ( column_default ilike '%select %' ) THEN ' _set_column_'||column_name||' FILLER VARCHAR,'  WHEN (length(column_set_using) > 0 ) THEN ' _set_column_'||column_name||' FILLER VARCHAR,' WHEN (data_type='time') THEN ' _timeFiller_'||column_name||' FILLER VARCHAR, '||column_name||' AS _timeFiller_'||column_name||'::time,' ELSE  column_name||',' END FROM columns where table_schema = '$schema_name' and table_name = '$table_name'  order by ordinal_position" | tr -d '\n' | sed -e "s/^/(/" -e "s/,$/)/" `
                   for data_file in `ls $data_dir/*.parquet`
                   do
-                     $VSQLA -e -c "COPY $table ${ColumnStr} FROM '$data_file' PARQUET " >> $RestoreLog 2>&1
+                     $VSQLA -e -c "COPY $table ${ColumnStr} FROM '$data_file' PARQUET EXCEPTIONS '${data_file}.excp' " >> $RestoreLog 2>&1
                      if [ $? -ne 0 ]; then echo "ERROR: Failed to restore table $table_name "; exit 1; fi
                   done
                 else
@@ -334,7 +359,7 @@ function restore() {
                 fi
             fi
         fi
-        echo "INFO:`date`:Table $table restored, Now record count is `get_table_count $table`" >> $RestoreLog
+        echo "INFO: `date`: Table $table restored, Now record count is `get_table_count $table`" >> $RestoreLog
     done < $BackupCompletedFile
 
     echo "INFO: `date`: Logical Restore completed." >> $RestoreLog
@@ -347,7 +372,7 @@ activity=$TASK
 if [ $TASK == "backup" ]; then
     mkdir -p $BACKUP_DATA_DIR
     rm -f $BackupLog;
-    echo "INFO: Starting Task $TASK at `date` on $BACKUP_DIR, with Target File = $TableNamesFile, Schmea = $SchemaList, Compression Type = $COMPRESS_TYPE "
+    echo "INFO: `date`:Starting Task $TASK on $BACKUP_DIR, with Target File = $TableNamesFile, Schmea = $SchemaList, Compression Type = $COMPRESS_TYPE "
     if [ -f "$TableNamesFile" ] || [ "X${SchemaList}" != "X" ] || [ "X${FullBackupRestore}" != "X" ];
     then
       rm -f $BackupCompletedFile
