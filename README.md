@@ -45,3 +45,6 @@ For more options use -h flag to get complete list.
 1) If tables are really large like if individual table size is more than 5 GB then it is better we create PARQUET backup becuase CSV ZIP will create a single large file however parquet will create multiple files for single table's data.  
 2) It cannot perform incremental Backup however Restore with -A will make it Append Only to load data into existing tables.
 3) Currently password is provided as parameter but no one would like this. If we set VSQL_PASSWORD environmet variable in advance before runing VLBR.sh then no need to provide password and it will read password  from environment variable. 
+4) This utility does not backup these objects - External Table, Sequence, View, User Profiles etc.
+5) This utility can not restore - Flatten Table Set columns, Identity
+
