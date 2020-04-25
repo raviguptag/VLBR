@@ -1,5 +1,5 @@
 # VLBR
-Vertica Logical Backup Recovery Script "VLBR.sh" has been created to archive data in open data formats like CSV ZIP , or PARQUET. To backup cluster data in Parquet format a shared mount point would be required. For one Node database Parquet format backup can be done on local mount point. 
+Vertica Logical Backup Recovery Script "VLBR.sh" has been created to archive data in open data formats like CSV ZIP , or PARQUET. To backup cluster data in Parquet format a shared file system mount point is required. For one Node database Parquet format backup can be done on local mount point and same can be restored on multinode environemnt. 
 
 ## Use Cases where this utility can help
 1) We have different Verica database environmets. Some of them are 3 node cluster and some of them are 6 node cluster. They cannot connect to each other to run IMPORT/EXPORT and we need an option to transfer data.
