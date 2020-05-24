@@ -49,8 +49,8 @@ Usage: VLBR.sh -t backup|restore -d backup_directory [-z GZIP|PARQUET]  [-f tabl
 }
 
 VSQLA="/opt/vertica/bin/vsql -p $Port -AXtn "
-VSQL="/opt/vertica/bin/vsql -p $Port"
-VSQLC="/opt/vertica/bin/vsql -AXtnq "
+VSQL="/opt/vertica/bin/vsql -p $Port "
+VSQLC="/opt/vertica/bin/vsql -AXtnq -p $Port "
 
 #echo "ECHO $# , , $* "
 
