@@ -44,6 +44,9 @@ Usage: VLBR.sh -t backup|restore -d backup_directory [-z GZIP|PARQUET]  [-f tabl
     -C Concurrency      : Number of tables to be backup concurrently. Default it is 1 that mean one table at a time 
     -z abc.tar          : Compile the backup directory into a tar file 
     -h                  : Help Usage
+    
+Example
+    ./VLBR.sh -t backup -d /home/dbadmin/bkp -u dbadmin -w passw0rd -F
 "
 
 }
@@ -73,7 +76,7 @@ while [ $# -gt 0 ]; do
             shift 2
             ;;
         "-w")
-            VSQL_PASSWORD=$2
+            export VSQL_PASSWORD=$2
             shift 2
             ;;
         "-t")
@@ -86,7 +89,7 @@ while [ $# -gt 0 ]; do
             shift 2
             ;;
         "-u")
-            VSQL_USER=$2
+            export VSQL_USER=$2
             shift 2
             ;;
         "-s")
